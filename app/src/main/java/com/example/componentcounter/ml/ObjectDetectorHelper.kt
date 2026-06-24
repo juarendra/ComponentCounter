@@ -20,6 +20,8 @@ class ObjectDetectorHelper(
 ) {
 
     private var objectDetector: ObjectDetector? = null
+    private var initAttempts: Int = 0
+    private val maxInitAttempts: Int = 3
 
     init {
         setupObjectDetector()
@@ -37,15 +39,21 @@ class ObjectDetectorHelper(
 
         try {
             objectDetector = ObjectDetector.createFromFileAndOptions(context, modelName, optionsBuilder.build())
+            initAttempts = 0 // reset on success
         } catch (e: Exception) {
-            objectDetectorListener?.onError("Object detector failed to initialize. See error logs for details")
-            Log.e("ObjectDetectorHelper", "TFLite failed to load model with error: " + e.message)
+            initAttempts++
+            Log.e("ObjectDetectorHelper", "TFLite failed to load model (attempt $initAttempts/$maxInitAttempts): ${e.message}")
+            if (initAttempts >= maxInitAttempts) {
+                objectDetectorListener?.onError("Object detector failed to initialize after $maxInitAttempts attempts")
+            }
         }
     }
 
     fun detect(image: Bitmap, imageRotation: Int) {
         if (objectDetector == null) {
+            if (initAttempts >= maxInitAttempts) return // give up after max retries
             setupObjectDetector()
+            if (objectDetector == null) return // still null after retry
         }
 
         var inferenceTime = SystemClock.uptimeMillis()

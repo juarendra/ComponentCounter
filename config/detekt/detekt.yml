@@ -1,0 +1,81 @@
+# Component Counter detekt config
+# See: https://detekt.dev/docs/introduction/configurations
+
+build:
+  maxIssues: 100
+
+style:
+  active: true
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+    excludes: ['**/test/**', '**/androidTest/**']
+  WildcardImport:
+    active: true
+    excludes: ['**/test/**', '**/androidTest/**']
+  MagicNumber:
+    active: true
+    excludes: ['**/test/**', '**/androidTest/**', '**/theme/**']
+  UnusedImports:
+    active: true
+  UnusedPrivateMember:
+    active: true
+  ForbiddenComment:
+    active: true
+    values: ['TODO:', 'FIXME:', 'STOPSHIP:']
+
+complexity:
+  active: true
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 20
+    thresholdInClasses: 20
+  LongMethod:
+    active: true
+    threshold: 80
+  LargeClass:
+    active: true
+    threshold: 600
+  ComplexCondition:
+    active: true
+    threshold: 5
+  CognitiveComplexMethod:
+    active: true
+    threshold: 20
+
+potential-bugs:
+  active: true
+  DuplicateCaseInWhenExpression:
+    active: true
+  MissingWhenCase:
+    active: true
+    excludes: ['**/test/**', '**/androidTest/**']
+  UnreachableCode:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true
+
+formatting:
+  active: true
+  Indentation:
+    active: true
+    indentSize: 4
+    continuationIndentSize: 4
+  SpacingAroundColon:
+    active: true
+  SpacingAroundComma:
+    active: true
+  SpacingAroundKeyword:
+    active: true
+  SpacingAroundOperators:
+    active: true
+  TrailingSpaces:
+    active: true
+
+exceptions:
+  active: true
+  TooGenericExceptionCaught:
+    active: true
+    excludes: ['**/ml/**']  # TFLite throws generic Exception
+  TooGenericExceptionThrown:
+    active: true

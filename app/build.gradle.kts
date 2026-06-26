@@ -2,6 +2,8 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.detekt)
+  alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -12,13 +14,24 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("STORE_FILE") ?: "release_keystore.jks")
+            storePassword = System.getenv("STORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS") ?: ""
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -44,6 +57,12 @@ android {
 
 kotlin {
     jvmToolchain(17)
+}
+
+detekt {
+    config.from(rootProject.file("config/detekt/detekt.yml"))
+    buildUponDefaultConfig = true
+    allRules = false
 }
 
 dependencies {
@@ -81,6 +100,11 @@ dependencies {
   androidTestImplementation(libs.androidx.test.runner)
   androidTestImplementation(libs.androidx.test.espresso.core)
 
+  // Roborazzi screenshot testing
+  androidTestImplementation(libs.roborazzi)
+  androidTestImplementation(libs.roborazzi.compose)
+  androidTestImplementation(libs.roborazzi.rule)
+
   // Navigation
   implementation(libs.androidx.navigation3.ui)
   implementation(libs.androidx.navigation3.runtime)
@@ -96,6 +120,4 @@ dependencies {
   implementation(libs.tensorflow.lite)
   implementation(libs.tensorflow.lite.task.vision)
 
-  // Coil
-  implementation(libs.coil.compose)
 }

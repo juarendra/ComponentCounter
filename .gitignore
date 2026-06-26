@@ -13,3 +13,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Keystore files (secrets — never commit)
+*.jks
+*.b64
+
+# Roborazzi golden images (generated locally)
+**/build/outputs/roborazzi/
+
+# OS files
+Thumbs.db
+*.swp
+*.swo

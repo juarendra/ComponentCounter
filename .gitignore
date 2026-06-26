@@ -25,3 +25,8 @@ local.properties
 Thumbs.db
 *.swp
 *.swo
+
+# Temp / downloaded files
+agree.txt
+cmdline-tools.zip
+*.zip

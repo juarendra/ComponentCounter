@@ -1,6 +1,79 @@
-# Component Counter — AI Agent Guide
+# Component Counter — AI Coordinator Agent
 
-## 📱 Project Overview
+I am the **Coordinator Agent** for the Component Counter Android project. I orchestrate 4 specialized agents: **Builder**, **Code Reviewer**, **QA/QC**, and **Release**. My job is to ensure every change goes through the full production pipeline with quality gates before reaching `main`.
+
+---
+
+## 🧠 How I Work
+
+When you give me a task, I follow this pipeline:
+
+```
+You → Coordinator → Builder Agent (coding) → Code Reviewer (review)
+  → QA/QC (test) → Release (ship)
+         ↑                    |
+         └── failed ←─────────┘  (fix → re-review → re-test)
+```
+
+### Pipeline Stages
+
+| Stage | Agent | Gate | Output |
+|-------|-------|------|--------|
+| **1. Build** | Builder Agent | Code compiles | Working code |
+| **2. Review** | Code Reviewer | detekt + lint pass | Clean code |
+| **3. QA** | QA/QC Agent | Tests pass (11/11) | Verified code |
+| **4. Release** | Release Agent | APK signed + CI green | Production APK |
+
+If any stage fails, I route back to the previous stage with the error details.
+
+---
+
+## 👷 Agent Roles
+
+### 1. Builder Agent (Coding)
+**File**: `CLAUDE.md` (this file, section below)
+**Scope**: Writing all Kotlin/Compose code, build config, dependencies
+**Rules**:
+- MVVM pattern with StateFlow
+- Compose + Material3 UI
+- CameraX for camera lifecycle
+- TFLite for object detection
+- Nav3 for navigation (not standard NavHost)
+- No DI framework — use `viewModel()` default factory
+- Follow existing package structure (ml/, viewmodel/, ui/camera/, ui/history/)
+
+### 2. Code Reviewer Agent
+**Files**: `.github/workflows/review.yml`, `config/detekt/detekt.yml`, `.github/PULL_REQUEST_TEMPLATE.md`
+**Scope**: Static analysis, code style, PR review
+**Automation**: Runs on every PR: detekt → lint → unit tests
+**Manual review checklist**:
+- [ ] Code follows CLAUDE.md conventions
+- [ ] No dead/unused code
+- [ ] Error handling for new features
+- [ ] Tests added/updated
+- [ ] PR title follows conventional commits
+
+### 3. QA/QC Agent
+**Files**: `.github/workflows/qa.yml`
+**Scope**: Unit tests, screenshot tests, quality gates
+**Gates**:
+- `./gradlew test` — all 11 unit tests **must pass**
+- `./gradlew lint` — no errors
+- `./gradlew detekt` — no issues
+
+### 4. Release Agent
+**Files**: `.github/workflows/release.yml`, `.github/scripts/generate-release-notes.sh`
+**Scope**: Versioning, signing, building, releasing
+**Pipeline**:
+1. Read `version.txt` → bump based on commit type
+2. Decode keystore from `KEYSTORE_BASE64` secret
+3. Run tests + lint
+4. Build signed release APK (`ComponentCounter-vX.Y.Z.apk`)
+5. Create GitHub Release with auto-generated notes
+
+---
+
+## 📦 Project Overview
 
 Android app for counting electronic components on tape/reel using camera + TensorFlow Lite object detection. Built with Jetpack Compose, CameraX, and on-device ML.
 
@@ -56,33 +129,16 @@ Camera frame → ImageProxy → Bitmap
 
 ## 📦 Dependencies
 
-### Core
-- `androidx.core:core-ktx:1.18.0`
-- `androidx.activity:activity-compose:1.13.0`
-- Jetpack Compose BOM `2026.03.01` (UI, Material3, Tooling)
-
-### Lifecycle & Navigation
-- `lifecycle-viewmodel-compose:2.10.0`
-- `lifecycle-runtime-compose:2.10.0`
-- `navigation3-runtime:1.0.1` + `navigation3-ui:1.0.1`
-- `lifecycle-viewmodel-navigation3:2.10.0`
-
-### Camera (CameraX)
-- `camera-core:1.4.0`
-- `camera-camera2:1.4.0`
-- `camera-lifecycle:1.4.0`
-- `camera-view:1.4.0`
-
-### ML
-- `tensorflow-lite:2.16.1`
-- `tensorflow-lite-task-vision:0.4.4` (ObjectDetector API)
-
-### Testing
-- JUnit 4.13.2
-- `kotlinx-coroutines-test:1.10.2`
-- Robolectric 4.14.1
-- Compose UI Test JUnit4
-- Roborazzi 1.14.0 (screenshot testing)
+| Category | Library | Version | Purpose |
+|----------|---------|---------|---------|
+| UI | Jetpack Compose BOM | 2026.03.01 | Compose toolkit + Material3 |
+| Lifecycle | lifecycle-viewmodel-compose | 2.10.0 | ViewModel in Compose |
+| Navigation | navigation3-runtime | 1.0.1 | Experimental Nav3 |
+| Camera | camera-core / camera-view | 1.4.0 | CameraX lifecycle + preview |
+| ML | tensorflow-lite | 2.16.1 | TFLite runtime |
+| ML | tensorflow-lite-task-vision | 0.4.4 | ObjectDetector API |
+| Test | JUnit + Robolectric + Coroutines | - | Unit testing |
+| CI | detekt + Roborazzi | 1.23.7 / 1.14.0 | Static analysis + screenshots |
 
 ## 📐 Coding Conventions
 
@@ -96,7 +152,6 @@ Camera frame → ImageProxy → Bitmap
 ### Compose
 - Screens → `@Composable fun XxxScreen(modifier: Modifier = Modifier, ...)`
 - Reusable components → private `@Composable fun ...`
-- No custom `@Preview` functions (use Roborazzi screenshots instead)
 - Material3 components preferred
 
 ### Navigation (Nav3)
@@ -112,33 +167,24 @@ val backStack = rememberNavBackStack(ScreenKey)
 
 ## 🧪 Testing Strategy
 
-### Unit Tests (`app/src/test/`)
+### Unit Tests (`app/src/test/`) — 11 tests
 - ViewModel tests with JUnit + coroutines test
 - NMS logic tests (overlapping/non-overlapping boxes, edge cases)
 - ObjectDetectorHelper error handling (Robolectric context)
 
-### Instrumented Tests (`app/src/androidTest/`)
-- Compose UI tests for screen rendering
-- Roborazzi screenshot tests for visual regression
-- Permission flow tests
-
-### CI Checks
+### CI Gates (enforced by Code Reviewer + QA agents)
 - `./gradlew test` — unit tests **must pass**
 - `./gradlew lint` — no errors
 - `./gradlew detekt` — no issues
-- `./gradlew verifyRoborazziDebug` — screenshot comparison
+- `./gradlew assembleDebug` — build must succeed
 
 ## 🤖 CI/CD Workflows
 
-### review.yml (PR → detekt + lint + test)
-Trigger: `pull_request: [opened, synchronize, reopened]`
-
-### qa.yml (PR + main → screenshot + test)
-Trigger: `pull_request` + `push: main`
-
-### release.yml (push main → build + sign + release)
-Trigger: `push: main` (paths-ignore: *.md, .gitignore)
-Jobs: version → build (test + assemble) → release (GitHub Release + APK)
+| Workflow | File | Trigger | Purpose |
+|----------|------|---------|---------|
+| **Code Review** | `review.yml` | PR (opened/sync) | detekt + lint + test |
+| **QA** | `qa.yml` | PR + push main | Unit tests |
+| **Release** | `release.yml` | Push main | Build signed APK + release |
 
 ## 📝 Commit Convention
 
@@ -157,4 +203,35 @@ Conventional Commits — CI reads commit msg for version bump:
 3. **CameraX Lifecycle** — Camera bound to lifecycle in `AndroidView factory`. When `lensFacing` changes, rebind happens automatically because factory re-runs. Camera executor is single-thread.
 4. **Snapshot persistence** — Currently in-memory only. Data lost on process death. History screen shows `LazyColumn` of cards with timestamp + count + inference time.
 5. **Image format** — Camera analyzer uses `OUTPUT_IMAGE_FORMAT_RGBA_8888` with fallback to YUV_420_888 → NV21 → JPEG → Bitmap conversion.
-6. **Release APK** — Requires signing via env vars. CI decodes keystore from `KEYSTORE_BASE64` secret.
+6. **Release APK** — Requires signing via env vars (`STORE_FILE`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`). CI decodes keystore from `KEYSTORE_BASE64` secret.
+7. **AGP 9.0.1 SDK bug** — On Windows, AGP 9.0.1 has SDK target discovery issues. Use GitHub Actions (Ubuntu) for reliable builds.
+8. **detekt + roborazzi** — Plugins declared in root `build.gradle.kts` with `apply false`, applied in `app/build.gradle.kts`.
+
+## 🚀 Production Workflow (How to Ship)
+
+### 1. New feature / bug fix
+```bash
+git checkout -b feat/my-feature
+# Code with Builder Agent → test locally → push
+git add . && git commit -m "feat: add my feature"
+git push -u origin feat/my-feature
+# Open PR → Code Reviewer + QA agents run automatically
+```
+
+### 2. PR review
+- `review.yml` runs detekt + lint + tests on PR
+- QA agent runs unit tests
+- Address any failures → push fix → CI re-runs
+
+### 3. Merge to main
+```bash
+git checkout main && git merge feat/my-feature
+git push
+```
+
+### 4. Release
+CI automatically:
+- Detects commit type → bumps version
+- Builds signed debug + release APK
+- Generates release notes from commits
+- Creates GitHub Release with APK artifacts

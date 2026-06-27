@@ -133,7 +133,7 @@ class CounterViewModelTest {
     ): Detection {
         val boundingBox = RectF(left, top, right, bottom)
         val categories = listOf(
-            Category.create(label, score)
+            Category.create(label, "", score)
         )
         // Detection constructor is internal; use reflection to create instance for testing
         return createDetectionReflective(boundingBox, categories)

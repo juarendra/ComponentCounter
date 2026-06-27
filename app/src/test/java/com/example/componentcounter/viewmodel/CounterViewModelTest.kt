@@ -131,16 +131,17 @@ class CounterViewModelTest {
         label: String, score: Float
     ): Detection {
         val boundingBox = RectF(left, top, right, bottom)
-        val category = org.tensorflow.lite.task.vision.detector.Detection.Category.create(label, score)
+        val categories = listOf(
+            org.tensorflow.lite.task.vision.detector.Category.create(label, score)
+        )
         // Detection constructor is internal; use reflection to create instance for testing
-        // Since Detection is a TFLite class with internal constructor, we use a workaround
-        return createDetectionReflective(boundingBox, listOf(category))
+        return createDetectionReflective(boundingBox, categories)
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun createDetectionReflective(
         boundingBox: RectF,
-        categories: List<org.tensorflow.lite.task.vision.detector.Detection.Category>
+        categories: List<org.tensorflow.lite.task.vision.detector.Category>
     ): Detection {
         try {
             val clazz = Detection::class.java

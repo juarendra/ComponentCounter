@@ -18,6 +18,9 @@ local.properties
 *.jks
 *.b64
 
+# Allow TFLite model files in assets
+!app/src/main/assets/*.tflite
+
 # Roborazzi golden images (generated locally)
 **/build/outputs/roborazzi/
 

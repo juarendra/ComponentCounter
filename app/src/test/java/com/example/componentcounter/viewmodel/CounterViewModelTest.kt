@@ -44,7 +44,7 @@ class CounterViewModelTest {
         viewModel.updateDetections(listOf(det1, det2), 200L, 480, 640)
         val state = viewModel.detectionState.value
         assertEquals(1, state.totalCount)
-        assertEquals(0.9f, state.detections[0].categories[0].score)
+        assertEquals(0.9f, state.detections[0].categories[0].score, 0.001f)
     }
 
     @Test
@@ -122,7 +122,7 @@ class CounterViewModelTest {
 
         viewModel.updateDetections(listOf(det1, det2), 100L, 480, 640)
         assertEquals(1, viewModel.detectionState.value.totalCount)
-        assertEquals(0.9f, viewModel.detectionState.value.detections[0].categories[0].score)
+        assertEquals(0.9f, viewModel.detectionState.value.detections[0].categories[0].score, 0.001f)
     }
 
     // --- helpers ---

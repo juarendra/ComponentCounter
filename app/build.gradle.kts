@@ -95,17 +95,16 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation("org.robolectric:robolectric:4.14.1")
+  testImplementation(libs.androidx.compose.ui.test.junit4)
+  testImplementation(libs.roborazzi)
+  testImplementation(libs.roborazzi.compose)
+  testImplementation(libs.roborazzi.rule)
 
   // Instrumented tests: jUnit rules and runners
   androidTestImplementation(libs.androidx.test.core)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.runner)
   androidTestImplementation(libs.androidx.test.espresso.core)
-
-  // Roborazzi screenshot testing
-  androidTestImplementation(libs.roborazzi)
-  androidTestImplementation(libs.roborazzi.compose)
-  androidTestImplementation(libs.roborazzi.rule)
 
   // Navigation
   implementation(libs.androidx.navigation3.ui)

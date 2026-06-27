@@ -2,19 +2,12 @@ package com.example.componentcounter.ml
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.RectF
 import android.os.SystemClock
-import android.util.Log
-import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
-import java.nio.FloatBuffer
-import kotlin.math.exp
-import kotlin.math.max
-import kotlin.math.min
 
 data class BBox(
     val x1: Float, val y1: Float,
@@ -23,36 +16,25 @@ data class BBox(
 )
 
 class ObjectDetectorHelper(
-    var threshold: Float = 0.5f,
-    var iouThreshold: Float = 0.5f,
     val context: Context,
     val listener: DetectorListener?
 ) {
-
-    private var interpreter: Interpreter? = null
-    private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
+    private var interpreter: org.tensorflow.lite.Interpreter? = null
     private val inputSize = 416
-    private var isInitialized = false
+    private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
 
     companion object {
         val LABEL_MAP = mapOf(
             0 to "Resistor", 1 to "Diode", 2 to "Transistor", 3 to "Condensator"
         )
+        private var cellOutputBuffer: Array<out Any>? = null
     }
 
     init {
-        setupDetector()
-    }
-
-    private fun setupDetector() {
         try {
-            val model = loadModelFile("best_float32.tflite")
-            interpreter = Interpreter(model)
-            isInitialized = true
-            Log.d("ObjectDetector", "YOLOv5n model loaded (input: ${inputSize}x${inputSize})")
+            val model = loadModelFile("best_nms.tflite")
+            interpreter = org.tensorflow.lite.Interpreter(model)
         } catch (e: Exception) {
-            Log.e("ObjectDetector", "Failed to load model: ${e.message}")
-            isInitialized = false
             listener?.onError("Model load failed: ${e.message}")
         }
     }
@@ -64,102 +46,57 @@ class ObjectDetectorHelper(
     }
 
     fun detect(bitmap: Bitmap) {
-        if (!isInitialized) {
+        val interpreter = interpreter
+        if (interpreter == null) {
             listener?.onResults(emptyList(), 0, bitmap.height, bitmap.width)
             return
         }
 
         val startTime = SystemClock.uptimeMillis()
 
-        // Preprocess: resize to 416x416, normalize
-        val input = bitmapToByteBuffer(bitmap)
+        // Preprocess: resize to 416x416, normalize to [0,1]
+        val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        val inputBuffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * 4)
+        inputBuffer.order(ByteOrder.nativeOrder())
+        val pixels = IntArray(inputSize * inputSize)
+        resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
+        for (p in pixels) {
+            inputBuffer.putFloat(((p shr 16) and 0xFF) / 255.0f)
+            inputBuffer.putFloat(((p shr 8) and 0xFF) / 255.0f)
+            inputBuffer.putFloat((p and 0xFF) / 255.0f)
+        }
+        inputBuffer.rewind()
 
-        // Output buffer: [1, 8, 3549] = float[1][8][3549]
-        val output = Array(1) { Array(8) { FloatArray(3549) } }
+        // Output format with NMS: [1, num_detections, 6] = [x1,y1,x2,y2,class,score]
+        // Allocate large enough (max 300 detections)
+        val output = Array(1) { Array(300) { FloatArray(6) } }
 
-        interpreter?.run(input, output)
+        interpreter.run(inputBuffer, output)
         val inferenceMs = SystemClock.uptimeMillis() - startTime
 
-        // Parse output
-        val detections = parseOutput(output[0], bitmap.width, bitmap.height)
-        listener?.onResults(detections, inferenceMs, bitmap.height, bitmap.width)
-    }
+        // Parse valid detections
+        val results = mutableListOf<BBox>()
+        val raw = output[0]
+        for (i in raw.indices) {
+            val row = raw[i]
+            val score = row[5]
+            if (score <= 0f) continue  // end of detections
 
-    private fun bitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
-        val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
-        val buffer = ByteBuffer.allocateDirect(1 * 3 * inputSize * inputSize * 4)
-        buffer.order(ByteOrder.nativeOrder())
-        buffer.rewind()
+            val classIdx = row[4].toInt().coerceIn(0, labels.size - 1)
+            val label = labels[classIdx]
 
-        val intValues = IntArray(inputSize * inputSize)
-        resized.getPixels(intValues, 0, inputSize, 0, 0, inputSize, inputSize)
-
-        for (pixel in intValues) {
-            buffer.putFloat(((pixel shr 16) and 0xFF) / 255.0f)
-            buffer.putFloat(((pixel shr 8) and 0xFF) / 255.0f)
-            buffer.putFloat((pixel and 0xFF) / 255.0f)
-        }
-        buffer.rewind()
-        return buffer
-    }
-
-    private fun parseOutput(output: Array<FloatArray>, imgW: Int, imgH: Int): List<BBox> {
-        // output[8][3549]: 8 = [cx, cy, w, h, p0, p1, p2, p3], 3549 detections
-        val data = Array(3549) { i -> FloatArray(8) { j -> output[j][i] } }
-        val candidates = mutableListOf<BBox>()
-
-        for (i in data.indices) {
-            val row = data[i]
-            val cx = row[0]
-            val cy = row[1]
-            val w = row[2]
-            val h = row[3]
-
-            var maxScore = 0f
-            var maxIdx = -1
-            for (c in 4..7) {
-                val s = sigmoid(row[c])
-                if (s > maxScore) { maxScore = s; maxIdx = c - 4 }
-            }
-
-            if (maxScore >= threshold && maxIdx in labels.indices) {
-                // Denormalize to image coordinates
-                val x1 = max(0f, (cx - w / 2) * imgW)
-                val y1 = max(0f, (cy - h / 2) * imgH)
-                val x2 = min(imgW.toFloat(), (cx + w / 2) * imgW)
-                val y2 = min(imgH.toFloat(), (cy + h / 2) * imgH)
-                candidates.add(BBox(x1, y1, x2, y2, labels[maxIdx], maxScore))
-            }
+            // Denormalize to bitmap dimensions
+            val scaleX = bitmap.width.toFloat() / inputSize
+            val scaleY = bitmap.height.toFloat() / inputSize
+            val box = BBox(
+                x1 = row[0] * scaleX, y1 = row[1] * scaleY,
+                x2 = row[2] * scaleX, y2 = row[3] * scaleY,
+                label = label, score = score
+            )
+            results.add(box)
         }
 
-        return nms(candidates)
-    }
-
-    private fun sigmoid(x: Float): Float = 1f / (1f + exp(-x))
-
-    private fun nms(boxes: List<BBox>): List<BBox> {
-        val sorted = boxes.sortedByDescending { it.score }
-        val kept = mutableListOf<BBox>()
-        for (box in sorted) {
-            var overlaps = false
-            for (existing in kept) {
-                if (iou(box, existing) > iouThreshold) { overlaps = true; break }
-            }
-            if (!overlaps) kept.add(box)
-        }
-        return kept
-    }
-
-    private fun iou(a: BBox, b: BBox): Float {
-        val ix1 = max(a.x1, b.x1)
-        val iy1 = max(a.y1, b.y1)
-        val ix2 = min(a.x2, b.x2)
-        val iy2 = min(a.y2, b.y2)
-        if (ix1 >= ix2 || iy1 >= iy2) return 0f
-        val iArea = (ix2 - ix1) * (iy2 - iy1)
-        val aArea = (a.x2 - a.x1) * (a.y2 - a.y1)
-        val bArea = (b.x2 - b.x1) * (b.y2 - b.y1)
-        return iArea / (aArea + bArea - iArea)
+        listener?.onResults(results, inferenceMs, bitmap.height, bitmap.width)
     }
 
     interface DetectorListener {

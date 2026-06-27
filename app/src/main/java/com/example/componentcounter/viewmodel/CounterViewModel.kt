@@ -1,18 +1,16 @@
 package com.example.componentcounter.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.componentcounter.ml.BBox
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.tensorflow.lite.task.vision.detector.Detection
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.min
-import kotlin.math.max
 
 data class DetectionState(
-    val detections: List<Detection> = emptyList(),
+    val detections: List<BBox> = emptyList(),
     val inferenceTime: Long = 0,
     val totalCount: Int = 0,
     val imageHeight: Int = 1,
@@ -35,13 +33,11 @@ class CounterViewModel : ViewModel() {
     private val _csvData = MutableStateFlow<String?>(null)
     val csvData: StateFlow<String?> = _csvData.asStateFlow()
 
-    fun updateDetections(results: List<Detection>?, time: Long, height: Int, width: Int) {
-        val rawDetections = results ?: emptyList()
-        val deduped = nonMaximumSuppression(rawDetections, iouThreshold = 0.5f)
+    fun updateDetections(results: List<BBox>, time: Long, height: Int, width: Int) {
         _detectionState.value = DetectionState(
-            detections = deduped,
+            detections = results,
             inferenceTime = time,
-            totalCount = deduped.size,
+            totalCount = results.size,
             imageHeight = height,
             imageWidth = width
         )
@@ -71,45 +67,5 @@ class CounterViewModel : ViewModel() {
     fun clearSnapshots() {
         _snapshots.value = emptyList()
         _csvData.value = null
-    }
-
-    /**
-     * Simple IoU-based deduplication. Two detections with IoU > threshold
-     * are considered same object; keep the one with higher score.
-     */
-    private fun nonMaximumSuppression(
-        detections: List<Detection>,
-        iouThreshold: Float
-    ): List<Detection> {
-        if (detections.size <= 1) return detections
-
-        val sorted = detections.sortedByDescending { it.categories.firstOrNull()?.score ?: 0f }
-        val kept = mutableListOf<Detection>()
-
-        for (detection in sorted) {
-            var overlaps = false
-            for (existing in kept) {
-                if (iou(detection.boundingBox, existing.boundingBox) > iouThreshold) {
-                    overlaps = true
-                    break
-                }
-            }
-            if (!overlaps) kept.add(detection)
-        }
-        return kept
-    }
-
-    private fun iou(a: android.graphics.RectF, b: android.graphics.RectF): Float {
-        val intersectLeft = max(a.left, b.left)
-        val intersectTop = max(a.top, b.top)
-        val intersectRight = min(a.right, b.right)
-        val intersectBottom = min(a.bottom, b.bottom)
-
-        if (intersectLeft >= intersectRight || intersectTop >= intersectBottom) return 0f
-
-        val intersectArea = (intersectRight - intersectLeft) * (intersectBottom - intersectTop)
-        val unionArea = (a.width() * a.height()) + (b.width() * b.height()) - intersectArea
-
-        return if (unionArea <= 0f) 0f else intersectArea / unionArea
     }
 }

@@ -4,6 +4,7 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.tensorflow.lite.task.vision.detector.Detection
+import org.tensorflow.lite.support.label.Category
 import android.graphics.RectF
 import java.util.Arrays
 
@@ -132,7 +133,7 @@ class CounterViewModelTest {
     ): Detection {
         val boundingBox = RectF(left, top, right, bottom)
         val categories = listOf(
-            org.tensorflow.lite.task.vision.detector.Category.create(label, score)
+            Category.create(label, score)
         )
         // Detection constructor is internal; use reflection to create instance for testing
         return createDetectionReflective(boundingBox, categories)
@@ -141,7 +142,7 @@ class CounterViewModelTest {
     @Suppress("UNCHECKED_CAST")
     private fun createDetectionReflective(
         boundingBox: RectF,
-        categories: List<org.tensorflow.lite.task.vision.detector.Category>
+        categories: List<Category>
     ): Detection {
         try {
             val clazz = Detection::class.java

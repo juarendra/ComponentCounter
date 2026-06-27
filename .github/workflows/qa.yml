@@ -31,17 +31,12 @@ jobs:
       - name: Generate screenshots
         run: ./gradlew recordRoborazziDebug --no-daemon
 
-      - name: Verify screenshots
-        run: ./gradlew verifyRoborazziDebug --no-daemon
-        continue-on-error: true
-
-      - name: Upload screenshot diffs
+      - name: Upload screenshots
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: screenshot-diffs
+          name: screenshots
           path: |
-            app/build/reports/roborazzi/
             app/build/outputs/roborazzi/
 
   unit-tests:

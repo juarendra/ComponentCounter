@@ -2,85 +2,168 @@ package com.example.componentcounter.ml
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.RectF
 import android.os.SystemClock
 import android.util.Log
-import org.tensorflow.lite.support.image.ImageProcessor
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.support.image.ops.Rot90Op
-import org.tensorflow.lite.task.core.BaseOptions
-import org.tensorflow.lite.task.vision.detector.Detection
-import org.tensorflow.lite.task.vision.detector.ObjectDetector
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
+import java.nio.FloatBuffer
+import kotlin.math.exp
+import kotlin.math.max
+import kotlin.math.min
+
+data class BBox(
+    val x1: Float, val y1: Float,
+    val x2: Float, val y2: Float,
+    val label: String, val score: Float
+)
 
 class ObjectDetectorHelper(
     var threshold: Float = 0.5f,
-    var numThreads: Int = 2,
-    var maxResults: Int = 50, // EfficientDet-Lite supports up to 50
+    var iouThreshold: Float = 0.5f,
     val context: Context,
-    val objectDetectorListener: DetectorListener?
+    val listener: DetectorListener?
 ) {
 
-    private var objectDetector: ObjectDetector? = null
-    private var initAttempts: Int = 0
-    private val maxInitAttempts: Int = 3
+    private var interpreter: Interpreter? = null
+    private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
+    private val inputSize = 416
+    private var isInitialized = false
 
     companion object {
-        // Label map matching the trained model's metadata
         val LABEL_MAP = mapOf(
-            1 to "Resistor",
-            2 to "Diode",
-            3 to "Transistor",
-            4 to "Condensator"
+            0 to "Resistor", 1 to "Diode", 2 to "Transistor", 3 to "Condensator"
         )
     }
 
     init {
-        setupObjectDetector()
+        setupDetector()
     }
 
-    fun setupObjectDetector() {
-        val optionsBuilder = ObjectDetector.ObjectDetectorOptions.builder()
-            .setScoreThreshold(threshold)
-            .setMaxResults(maxResults)
-
-        val baseOptionsBuilder = BaseOptions.builder().setNumThreads(numThreads)
-        optionsBuilder.setBaseOptions(baseOptionsBuilder.build())
-
-        val modelName = "efficientdet-lite0.tflite"
-
+    private fun setupDetector() {
         try {
-            objectDetector = ObjectDetector.createFromFileAndOptions(context, modelName, optionsBuilder.build())
-            initAttempts = 0 // reset on success
+            val model = loadModelFile("best_float32.tflite")
+            interpreter = Interpreter(model)
+            isInitialized = true
+            Log.d("ObjectDetector", "YOLOv5n model loaded (input: ${inputSize}x${inputSize})")
         } catch (e: Exception) {
-            initAttempts++
-            Log.e("ObjectDetectorHelper", "TFLite failed to load model (attempt $initAttempts/$maxInitAttempts): ${e.message}")
-            if (initAttempts >= maxInitAttempts) {
-                objectDetectorListener?.onError("Object detector failed to initialize after $maxInitAttempts attempts")
+            Log.e("ObjectDetector", "Failed to load model: ${e.message}")
+            isInitialized = false
+            listener?.onError("Model load failed: ${e.message}")
+        }
+    }
+
+    private fun loadModelFile(path: String): MappedByteBuffer {
+        val fd = context.assets.openFd(path)
+        val stream = FileInputStream(fd.fileDescriptor)
+        return stream.channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+    }
+
+    fun detect(bitmap: Bitmap) {
+        if (!isInitialized) {
+            listener?.onResults(emptyList(), 0, bitmap.height, bitmap.width)
+            return
+        }
+
+        val startTime = SystemClock.uptimeMillis()
+
+        // Preprocess: resize to 416x416, normalize
+        val input = bitmapToByteBuffer(bitmap)
+
+        // Output buffer: [1, 8, 3549] = float[1][8][3549]
+        val output = Array(1) { Array(8) { FloatArray(3549) } }
+
+        interpreter?.run(input, output)
+        val inferenceMs = SystemClock.uptimeMillis() - startTime
+
+        // Parse output
+        val detections = parseOutput(output[0], bitmap.width, bitmap.height)
+        listener?.onResults(detections, inferenceMs, bitmap.height, bitmap.width)
+    }
+
+    private fun bitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
+        val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        val buffer = ByteBuffer.allocateDirect(1 * 3 * inputSize * inputSize * 4)
+        buffer.order(ByteOrder.nativeOrder())
+        buffer.rewind()
+
+        val intValues = IntArray(inputSize * inputSize)
+        resized.getPixels(intValues, 0, inputSize, 0, 0, inputSize, inputSize)
+
+        for (pixel in intValues) {
+            buffer.putFloat(((pixel shr 16) and 0xFF) / 255.0f)
+            buffer.putFloat(((pixel shr 8) and 0xFF) / 255.0f)
+            buffer.putFloat((pixel and 0xFF) / 255.0f)
+        }
+        buffer.rewind()
+        return buffer
+    }
+
+    private fun parseOutput(output: Array<FloatArray>, imgW: Int, imgH: Int): List<BBox> {
+        // output[8][3549]: 8 = [cx, cy, w, h, p0, p1, p2, p3], 3549 detections
+        val data = Array(3549) { i -> FloatArray(8) { j -> output[j][i] } }
+        val candidates = mutableListOf<BBox>()
+
+        for (i in data.indices) {
+            val row = data[i]
+            val cx = row[0]
+            val cy = row[1]
+            val w = row[2]
+            val h = row[3]
+
+            var maxScore = 0f
+            var maxIdx = -1
+            for (c in 4..7) {
+                val s = sigmoid(row[c])
+                if (s > maxScore) { maxScore = s; maxIdx = c - 4 }
+            }
+
+            if (maxScore >= threshold && maxIdx in labels.indices) {
+                // Denormalize to image coordinates
+                val x1 = max(0f, (cx - w / 2) * imgW)
+                val y1 = max(0f, (cy - h / 2) * imgH)
+                val x2 = min(imgW.toFloat(), (cx + w / 2) * imgW)
+                val y2 = min(imgH.toFloat(), (cy + h / 2) * imgH)
+                candidates.add(BBox(x1, y1, x2, y2, labels[maxIdx], maxScore))
             }
         }
+
+        return nms(candidates)
     }
 
-    fun detect(image: Bitmap, imageRotation: Int) {
-        if (objectDetector == null) {
-            if (initAttempts >= maxInitAttempts) return // give up after max retries
-            setupObjectDetector()
-            if (objectDetector == null) return // still null after retry
+    private fun sigmoid(x: Float): Float = 1f / (1f + exp(-x))
+
+    private fun nms(boxes: List<BBox>): List<BBox> {
+        val sorted = boxes.sortedByDescending { it.score }
+        val kept = mutableListOf<BBox>()
+        for (box in sorted) {
+            var overlaps = false
+            for (existing in kept) {
+                if (iou(box, existing) > iouThreshold) { overlaps = true; break }
+            }
+            if (!overlaps) kept.add(box)
         }
+        return kept
+    }
 
-        var inferenceTime = SystemClock.uptimeMillis()
-
-        // Create preprocessor for the image.
-        val imageProcessor = ImageProcessor.Builder().add(Rot90Op(-imageRotation / 90)).build()
-
-        // Preprocess the image and convert it into a TensorImage for detection.
-        val tensorImage = imageProcessor.process(TensorImage.fromBitmap(image))
-
-        val results = objectDetector?.detect(tensorImage)
-        inferenceTime = SystemClock.uptimeMillis() - inferenceTime
-        objectDetectorListener?.onResults(results, inferenceTime, tensorImage.height, tensorImage.width)
+    private fun iou(a: BBox, b: BBox): Float {
+        val ix1 = max(a.x1, b.x1)
+        val iy1 = max(a.y1, b.y1)
+        val ix2 = min(a.x2, b.x2)
+        val iy2 = min(a.y2, b.y2)
+        if (ix1 >= ix2 || iy1 >= iy2) return 0f
+        val iArea = (ix2 - ix1) * (iy2 - iy1)
+        val aArea = (a.x2 - a.x1) * (a.y2 - a.y1)
+        val bArea = (b.x2 - b.x1) * (b.y2 - b.y1)
+        return iArea / (aArea + bArea - iArea)
     }
 
     interface DetectorListener {
         fun onError(error: String)
-        fun onResults(results: MutableList<Detection>?, inferenceTime: Long, imageHeight: Int, imageWidth: Int)
+        fun onResults(results: List<BBox>, inferenceTime: Long, imageHeight: Int, imageWidth: Int)
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -134,6 +135,12 @@ fun CameraScreen(modifier: Modifier = Modifier, viewModel: CounterViewModel = vi
             )
             val offsetX = (size.width - detectionState.imageWidth * scaleFactor) / 2f
             val offsetY = (size.height - detectionState.imageHeight * scaleFactor) / 2f
+            val textPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.GREEN
+                textSize = 36f
+                isAntiAlias = true
+                style = android.graphics.Paint.Style.FILL
+            }
 
             for (detection in detectionState.detections) {
                 val boundingBox = detection.boundingBox
@@ -148,6 +155,15 @@ fun CameraScreen(modifier: Modifier = Modifier, viewModel: CounterViewModel = vi
                     size = Size(right - left, bottom - top),
                     style = Stroke(width = 4.dp.toPx())
                 )
+
+                // Draw label
+                val cat = detection.categories.firstOrNull()
+                val label = if (cat != null) "${cat.label} ${(cat.score * 100).toInt()}%" else ""
+                if (label.isNotEmpty()) {
+                    drawContext.canvas.nativeCanvas.drawText(
+                        label, left, top - 8f, textPaint
+                    )
+                }
             }
         }
 

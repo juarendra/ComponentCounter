@@ -12,9 +12,9 @@ import org.tensorflow.lite.task.vision.detector.Detection
 import org.tensorflow.lite.task.vision.detector.ObjectDetector
 
 class ObjectDetectorHelper(
-    var threshold: Float = 0.4f,
+    var threshold: Float = 0.5f,
     var numThreads: Int = 2,
-    var maxResults: Int = 100, // components on tape can be many
+    var maxResults: Int = 50, // EfficientDet-Lite supports up to 50
     val context: Context,
     val objectDetectorListener: DetectorListener?
 ) {
@@ -22,6 +22,16 @@ class ObjectDetectorHelper(
     private var objectDetector: ObjectDetector? = null
     private var initAttempts: Int = 0
     private val maxInitAttempts: Int = 3
+
+    companion object {
+        // Label map matching the trained model's metadata
+        val LABEL_MAP = mapOf(
+            1 to "Resistor",
+            2 to "Diode",
+            3 to "Transistor",
+            4 to "Condensator"
+        )
+    }
 
     init {
         setupObjectDetector()
@@ -35,7 +45,7 @@ class ObjectDetectorHelper(
         val baseOptionsBuilder = BaseOptions.builder().setNumThreads(numThreads)
         optionsBuilder.setBaseOptions(baseOptionsBuilder.build())
 
-        val modelName = "mobilenetv1.tflite"
+        val modelName = "efficientdet-lite0.tflite"
 
         try {
             objectDetector = ObjectDetector.createFromFileAndOptions(context, modelName, optionsBuilder.build())

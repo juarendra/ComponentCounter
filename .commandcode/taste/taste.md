@@ -4,4 +4,5 @@
 
 
 # workflow
-- Work directly without asking for permission before editing files, creating files, or performing actions. Avoid request-for-approval patterns and just execute. Confidence: 0.85
+- Work directly without asking for permission — use own recommendations for decisions/confirmations, execute directly, and deliver production-ready results. Avoid request-for-approval patterns. Confidence: 0.88
+- Communicate in Indonesian (Bahasa Indonesia) unless user switches to English. Confidence: 0.75

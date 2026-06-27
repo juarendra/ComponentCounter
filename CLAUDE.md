@@ -137,6 +137,7 @@ Camera frame → ImageProxy → Bitmap
 | Camera | camera-core / camera-view | 1.4.0 | CameraX lifecycle + preview |
 | ML | tensorflow-lite | 2.16.1 | TFLite runtime |
 | ML | tensorflow-lite-task-vision | 0.4.4 | ObjectDetector API |
+| ML | efficientdet-lite0 | - | Trained on smdComponents (4 classes) |
 | Test | JUnit + Robolectric + Coroutines | - | Unit testing |
 | CI | detekt + Roborazzi | 1.23.7 / 1.14.0 | Static analysis + screenshots |
 
@@ -199,7 +200,7 @@ Conventional Commits — CI reads commit msg for version bump:
 ## ⚠️ Common Gotchas
 
 1. **Nav3 API** — Not standard Navigation Compose. Uses `rememberNavBackStack()` + manual tab switching via `when(selectedTab)`. No NavHost. NavKeys must be `@Serializable data object`.
-2. **TFLite Model** — `mobilenetv1.tflite` loaded from assets. Uses `ObjectDetector.createFromFileAndOptions()`. Model has 2 threads, 0.4 threshold, 100 max results.
+2. **TFLite Model** — `efficientdet-lite0.tflite` loaded from assets. Detects 4 classes: Resistor (1), Diode (2), Transistor (3), Condensator (4). Model has 2 threads, 0.5 threshold, 50 max results. Training notebook at `ml-training/train_efficientdet.ipynb`.
 3. **CameraX Lifecycle** — Camera bound to lifecycle in `AndroidView factory`. When `lensFacing` changes, rebind happens automatically because factory re-runs. Camera executor is single-thread.
 4. **Snapshot persistence** — Currently in-memory only. Data lost on process death. History screen shows `LazyColumn` of cards with timestamp + count + inference time.
 5. **Image format** — Camera analyzer uses `OUTPUT_IMAGE_FORMAT_RGBA_8888` with fallback to YUV_420_888 → NV21 → JPEG → Bitmap conversion.

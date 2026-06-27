@@ -135,23 +135,6 @@ class CounterViewModelTest {
         val categories = listOf(
             Category.create(label, "", score)
         )
-        // Detection constructor is internal; use reflection to create instance for testing
-        return createDetectionReflective(boundingBox, categories)
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun createDetectionReflective(
-        boundingBox: RectF,
-        categories: List<Category>
-    ): Detection {
-        try {
-            val clazz = Detection::class.java
-            val constructor = clazz.getDeclaredConstructor(RectF::class.java, List::class.java)
-            constructor.isAccessible = true
-            return constructor.newInstance(boundingBox, categories)
-        } catch (e: Exception) {
-            throw RuntimeException("Failed to create Detection instance for testing. " +
-                "TFLite Detection constructor may have changed.", e)
-        }
+        return Detection.create(boundingBox, categories)
     }
 }

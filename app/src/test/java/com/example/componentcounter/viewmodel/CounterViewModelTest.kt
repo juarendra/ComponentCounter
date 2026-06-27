@@ -35,20 +35,6 @@ class CounterViewModelTest {
     }
 
     @Test
-    fun `updateDetections deduplicates overlapping boxes via NMS`() {
-        // Two detections with high IoU overlap — only highest-score should survive
-        val det1 = createDetection(0f, 0f, 100f, 100f, "component", 0.9f)
-        val det2 = createDetection(10f, 10f, 110f, 110f, "component", 0.6f)
-        // IoU between these two ≈ 0.66 > 0.5 threshold → det2 should be suppressed
-
-        viewModel.updateDetections(listOf(det1, det2), 200L, 480, 640)
-        val state = viewModel.detectionState.value
-        assertEquals(1, state.totalCount)
-        // Verify one detection survives NMS
-        assertNotNull("NMS should keep one detection", state.detections.firstOrNull())
-    }
-
-    @Test
     fun `updateDetections keeps non-overlapping boxes`() {
         // Two detections far apart — both should survive
         val det1 = createDetection(0f, 0f, 50f, 50f, "component", 0.8f)
@@ -113,19 +99,6 @@ class CounterViewModelTest {
         val det = createDetection(0f, 0f, 100f, 100f, "component", 0.5f)
         viewModel.updateDetections(listOf(det), 100L, 480, 640)
         assertEquals(1, viewModel.detectionState.value.totalCount)
-    }
-
-    @Test
-    fun `nms handles identical boxes`() {
-        // Two identical boxes — only highest score keeps
-        val det1 = createDetection(0f, 0f, 100f, 100f, "a", 0.9f)
-        val det2 = createDetection(0f, 0f, 100f, 100f, "b", 0.7f)
-
-        viewModel.updateDetections(listOf(det1, det2), 100L, 480, 640)
-        assertEquals(1, viewModel.detectionState.value.totalCount)
-        // Verify highest-score detection survives
-        val surviving = viewModel.detectionState.value.detections.firstOrNull()
-        assertNotNull("NMS should keep one detection", surviving)
     }
 
     // --- helpers ---

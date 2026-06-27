@@ -46,6 +46,7 @@ import java.util.Locale
 
 @Composable
 fun HistoryScreen(
+    modifier: Modifier = Modifier,
     viewModel: CounterViewModel = viewModel()
 ) {
     val snapshots by viewModel.snapshots.collectAsState()

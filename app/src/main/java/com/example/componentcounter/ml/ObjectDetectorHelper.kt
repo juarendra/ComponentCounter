@@ -8,7 +8,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
-import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 
@@ -25,17 +24,15 @@ class ObjectDetectorHelper(
     private var interpreter: org.tensorflow.lite.Interpreter? = null
     private val inputSize = 416
     private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
-    private val threshold = 0.5f
+    private val threshold = 0.25f
 
-    // YOLOv5 anchor configuration for 416x416
-    private val strides = intArrayOf(8, 16, 32)
-    private val anchors = arrayOf(
-        arrayOf(intArrayOf(10, 13), intArrayOf(16, 30), intArrayOf(33, 23)),
-        arrayOf(intArrayOf(30, 61), intArrayOf(62, 45), intArrayOf(59, 119)),
-        arrayOf(intArrayOf(116, 90), intArrayOf(156, 198), intArrayOf(373, 326))
-    )
+    // Anchor-free YOLO (v5u/v8) output: [1, 4+numClasses, numBoxes]
+    // numBoxes = 52*52 + 26*26 + 13*13 = 3549 for 416 input
     private val numClasses = labels.size
     private val numOutputs = 4 + numClasses
+    private val numBoxes = (inputSize / 8) * (inputSize / 8) +
+        (inputSize / 16) * (inputSize / 16) +
+        (inputSize / 32) * (inputSize / 32)
 
     companion object {
         val LABEL_MAP = mapOf(
@@ -79,80 +76,58 @@ class ObjectDetectorHelper(
         }
         inputBuffer.rewind()
 
-        // Output: [1, 8, 3549] — 3549 = (13*13 + 26*26 + 52*52) * 3 anchors
-        val totalDetections = (13*13 + 26*26 + 52*52) * 3
-        val output = Array(1) { Array(numOutputs) { FloatArray(totalDetections) } }
-        interpreter.run(inputBuffer, output)
+        // Output: [1, numOutputs, numBoxes] — anchor-free, channel-first.
+        // Channels 0..3 = cx,cy,w,h ; channels 4.. = per-class confidence (already 0..1).
+        val output = Array(1) { Array(numOutputs) { FloatArray(numBoxes) } }
+        try {
+            interpreter.run(inputBuffer, output)
+        } catch (e: Exception) {
+            listener?.onError("Inference failed: ${e.message}")
+            listener?.onResults(emptyList(), 0, bitmap.height, bitmap.width)
+            return
+        }
 
         val rawOutput = output[0]
         val candidates = mutableListOf<BBox>()
 
-        // Iterate over 3 detection scales
-        var offset = 0
-        for (scaleIdx in strides.indices) {
-            val stride = strides[scaleIdx]
-            val gridSize = inputSize / stride
-            val numAnchors = anchors[scaleIdx].size
-            val numCells = gridSize * gridSize * numAnchors
-
-            for (i in 0 until numCells) {
-                val idx = offset + i
-                if (idx >= totalDetections) break
-
-                // Raw outputs
-                val rawCx = rawOutput[0][idx]
-                val rawCy = rawOutput[1][idx]
-                val rawW  = rawOutput[2][idx]
-                val rawH  = rawOutput[3][idx]
-
-                // Find best class
-                var maxScore = 0f
-                var maxClsIdx = -1
-                for (c in 0 until numClasses) {
-                    val s = sigmoid(rawOutput[4 + c][idx])
-                    if (s > maxScore) { maxScore = s; maxClsIdx = c }
-                }
-
-                if (maxScore < threshold) continue
-
-                // Decode box coordinates (YOLOv5 format)
-                val gridY = (i / numAnchors) / gridSize
-                val gridX = (i / numAnchors) % gridSize
-                val anchorIdx = i % numAnchors
-                val anchorW = anchors[scaleIdx][anchorIdx][0].toFloat()
-                val anchorH = anchors[scaleIdx][anchorIdx][1].toFloat()
-
-                val cx = (sigmoid(rawCx) * 2 - 0.5f + gridX) * stride
-                val cy = (sigmoid(rawCy) * 2 - 0.5f + gridY) * stride
-                val w  = ((sigmoid(rawW) * 2).pow(2) * anchorW)
-                val h  = ((sigmoid(rawH) * 2).pow(2) * anchorH)
-
-                val x1 = (cx - w / 2) / inputSize * bitmap.width
-                val y1 = (cy - h / 2) / inputSize * bitmap.height
-                val x2 = (cx + w / 2) / inputSize * bitmap.width
-                val y2 = (cy + h / 2) / inputSize * bitmap.height
-
-                if (x2 > x1 && y2 > y1) {
-                    candidates.add(BBox(
-                        max(0f, x1), max(0f, y1),
-                        min(bitmap.width.toFloat(), x2), min(bitmap.height.toFloat(), y2),
-                        labels[maxClsIdx], maxScore
-                    ))
-                }
+        for (idx in 0 until numBoxes) {
+            // Best class (scores already passed through sigmoid in the exported graph)
+            var maxScore = 0f
+            var maxClsIdx = -1
+            for (c in 0 until numClasses) {
+                val s = rawOutput[4 + c][idx]
+                if (s > maxScore) { maxScore = s; maxClsIdx = c }
             }
-            offset += numCells
+            if (maxScore < threshold || maxClsIdx < 0) continue
+
+            // Box channels. Ultralytics TFLite export emits normalized 0..1 xywh;
+            // guard in case a build emits pixel (0..inputSize) coords instead.
+            var cx = rawOutput[0][idx]
+            var cy = rawOutput[1][idx]
+            var w = rawOutput[2][idx]
+            var h = rawOutput[3][idx]
+            if (cx > 1.5f || cy > 1.5f || w > 1.5f || h > 1.5f) {
+                cx /= inputSize; cy /= inputSize; w /= inputSize; h /= inputSize
+            }
+
+            val x1 = (cx - w / 2) * bitmap.width
+            val y1 = (cy - h / 2) * bitmap.height
+            val x2 = (cx + w / 2) * bitmap.width
+            val y2 = (cy + h / 2) * bitmap.height
+
+            if (x2 > x1 && y2 > y1) {
+                candidates.add(BBox(
+                    max(0f, x1), max(0f, y1),
+                    min(bitmap.width.toFloat(), x2), min(bitmap.height.toFloat(), y2),
+                    labels[maxClsIdx], maxScore
+                ))
+            }
         }
 
         // NMS
         val results = nms(candidates)
         val inferenceMs = SystemClock.uptimeMillis() - startTime
         listener?.onResults(results, inferenceMs, bitmap.height, bitmap.width)
-    }
-
-    private fun sigmoid(x: Float): Float = 1f / (1f + exp(-x))
-
-    private fun Float.pow(n: Int): Float {
-        var r = 1f; repeat(n) { r *= this }; return r
     }
 
     private fun nms(boxes: List<BBox>): List<BBox> {

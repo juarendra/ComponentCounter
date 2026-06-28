@@ -168,7 +168,7 @@ fun CameraPreviewWithDetection(context: Context, lifecycleOwner: androidx.lifecy
             val imageAnalyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
-                .also { it.setAnalyzer(cameraExecutor) { proxy -> proxy.use { val bmp = proxy.toBitmap() ?: return@use; detector.detect(bmp) } } }
+                .also { it.setAnalyzer(cameraExecutor) { proxy -> proxy.use { val bmp = proxy.toBitmap() ?: return@use; detector.detect(rotateBitmap(bmp, proxy.imageInfo.rotationDegrees)) } } }
 
             val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             try { cameraProvider.unbindAll(); cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalyzer) }
@@ -179,6 +179,12 @@ fun CameraPreviewWithDetection(context: Context, lifecycleOwner: androidx.lifecy
 
     DisposableEffect(lensFacing) { onDispose { } }
     DisposableEffect(Unit) { onDispose { cameraExecutor.shutdown() } }
+}
+
+private fun rotateBitmap(bitmap: android.graphics.Bitmap, degrees: Int): android.graphics.Bitmap {
+    if (degrees == 0) return bitmap
+    val matrix = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
+    return android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }
 
 private fun androidx.camera.core.ImageProxy.toBitmap(): android.graphics.Bitmap? {

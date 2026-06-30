@@ -13,8 +13,10 @@ android {
         applicationId = "com.example.componentcounter"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI injects the real release version via env (see .github/workflows/release.yml);
+        // local builds fall back to sensible defaults.
+        versionCode = (System.getenv("APP_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("APP_VERSION") ?: "1.0.0"
     }
 
     signingConfigs {

@@ -21,7 +21,7 @@ You → Coordinator → Builder Agent (coding) → Code Reviewer (review)
 |-------|-------|------|--------|
 | **1. Build** | Builder Agent | Code compiles | Working code |
 | **2. Review** | Code Reviewer | detekt + lint pass | Clean code |
-| **3. QA** | QA/QC Agent | Tests pass (11/11) | Verified code |
+| **3. QA** | QA/QC Agent | Tests pass (18/18) | Verified code |
 | **4. Release** | Release Agent | APK signed + CI green | Production APK |
 
 If any stage fails, I route back to the previous stage with the error details.
@@ -57,7 +57,7 @@ If any stage fails, I route back to the previous stage with the error details.
 **Files**: `.github/workflows/qa.yml`
 **Scope**: Unit tests, screenshot tests, quality gates
 **Gates**:
-- `./gradlew test` — all 11 unit tests **must pass**
+- `./gradlew test` — all 18 unit tests **must pass**
 - `./gradlew lint` — no errors
 - `./gradlew detekt` — no issues
 
@@ -168,10 +168,10 @@ val backStack = rememberNavBackStack(ScreenKey)
 
 ## 🧪 Testing Strategy
 
-### Unit Tests (`app/src/test/`) — 11 tests
-- ViewModel tests with JUnit + coroutines test
-- NMS logic tests (overlapping/non-overlapping boxes, edge cases)
-- ObjectDetectorHelper error handling (Robolectric context)
+### Unit Tests (`app/src/test/`) — 18 tests
+- ViewModel tests with JUnit + coroutines test (10)
+- Letterbox geometry + decode/NMS logic tests (5) — `LetterboxTest`, `DecodeOutputTest`
+- ObjectDetectorHelper error handling (Robolectric context) (3)
 
 ### CI Gates (enforced by Code Reviewer + QA agents)
 - `./gradlew test` — unit tests **must pass**

@@ -2,7 +2,7 @@
 
 Android app for counting SMD electronic components on tape/reel using camera + TensorFlow Lite object detection.
 
-Built with Jetpack Compose, CameraX, and EfficientDet-Lite0.
+Built with Jetpack Compose, CameraX, and a YOLOv8 TFLite model (`best_float32.tflite`).
 
 ## Features
 
@@ -18,16 +18,19 @@ Built with Jetpack Compose, CameraX, and EfficientDet-Lite0.
 ```
 MVVM + StateFlow + Compose
 ├── CameraX (camera preview + frame analysis)
-├── TFLite Task Vision (EfficientDet-Lite0)
-├── CounterViewModel (NMS dedup, state management)
+├── TFLite YOLOv8 (best_float32.tflite, 416 input, NMS in ObjectDetectorHelper)
+├── CounterViewModel (state management)
 └── Material3 UI (Camera + History screens)
 ```
 
 ## Training the Model
 
-See [`ml-training/README.md`](ml-training/README.md) for model training instructions.
+The `ml-training/` pipeline trains a YOLOv8 model and exports `best_float32.tflite`.
+See [`ml-training/README.md`](ml-training/README.md) for training instructions and
+[`ml-training/MODEL_IO.md`](ml-training/MODEL_IO.md) for the verified I/O contract
+(416×416 input, `[1,8,3549]` output, letterbox preprocessing).
 
-Quick start: Open the Colab notebook and run with a free Roboflow API key.
+Quick start: Open the [`train_yolo.ipynb`](ml-training/train_yolo.ipynb) Colab notebook and run with a free Roboflow API key.
 
 ## Building
 

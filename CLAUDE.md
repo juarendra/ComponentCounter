@@ -89,8 +89,8 @@ MVVM + StateFlow + Compose
 ### Package Structure
 ```
 com.example.componentcounter/
-├── ml/ObjectDetectorHelper.kt    — TFLite model wrapper
-├── viewmodel/CounterViewModel.kt — all state management + NMS logic
+├── ml/ObjectDetectorHelper.kt    — TFLite model wrapper + NMS (nms())
+├── viewmodel/CounterViewModel.kt — state management only
 ├── ui/camera/CameraScreen.kt     — live camera + detection overlay
 ├── ui/history/HistoryScreen.kt   — snapshot list + CSV export
 ├── ui/main/MainScreen.kt         — legacy wrapper (keep for compat)
@@ -104,8 +104,8 @@ com.example.componentcounter/
 ```
 Camera frame → ImageProxy → Bitmap
   → ObjectDetectorHelper.detect() → List<Detection>
-  → CounterViewModel.updateDetections()
-    → NMS dedup (IoU > 0.5 filter)
+    → NMS dedup (nms(), IoU filter) inside detect()
+  → CounterViewModel.updateDetections() — stores already-deduped results
   → StateFlow<DetectionState> → UI collectAsState()
 ```
 
@@ -137,7 +137,7 @@ Camera frame → ImageProxy → Bitmap
 | Camera | camera-core / camera-view | 1.4.0 | CameraX lifecycle + preview |
 | ML | tensorflow-lite | 2.16.1 | TFLite runtime |
 | ML | tensorflow-lite-task-vision | 0.4.4 | ObjectDetector API |
-| ML | efficientdet-lite0 | - | Trained on smdComponents (4 classes) |
+| ML | best_float32.tflite | - | YOLOv5/v8n anchor-free, 4 classes, trained on smdComponents |
 | Test | JUnit + Robolectric + Coroutines | - | Unit testing |
 | CI | detekt + Roborazzi | 1.23.7 / 1.14.0 | Static analysis + screenshots |
 
@@ -200,10 +200,10 @@ Conventional Commits — CI reads commit msg for version bump:
 ## ⚠️ Common Gotchas
 
 1. **Nav3 API** — Not standard Navigation Compose. Uses `rememberNavBackStack()` + manual tab switching via `when(selectedTab)`. No NavHost. NavKeys must be `@Serializable data object`.
-2. **TFLite Model** — `efficientdet-lite0.tflite` loaded from assets. Detects 4 classes: Resistor (1), Diode (2), Transistor (3), Condensator (4). Model has 2 threads, 0.5 threshold, 50 max results. Training notebook at `ml-training/train_efficientdet.ipynb`.
+2. **TFLite Model** — `best_float32.tflite` loaded from assets. YOLO anchor-free (YOLOv5/v8n), input 416×416, output `[1,8,3549]`, normalized 0..1 coords, letterbox preprocessing. Detects 4 classes: Resistor (0), Diode (1), Transistor (2), Condensator (3). Detector threshold 0.15 (interim — model is weak). See `ml-training/MODEL_IO.md` for the verified I/O contract; YOLOv8 training notebook at `ml-training/train_yolo.ipynb`.
 3. **CameraX Lifecycle** — Camera bound to lifecycle in `AndroidView factory`. When `lensFacing` changes, rebind happens automatically because factory re-runs. Camera executor is single-thread.
 4. **Snapshot persistence** — Currently in-memory only. Data lost on process death. History screen shows `LazyColumn` of cards with timestamp + count + inference time.
-5. **Image format** — Camera analyzer uses `OUTPUT_IMAGE_FORMAT_RGBA_8888` with fallback to YUV_420_888 → NV21 → JPEG → Bitmap conversion.
+5. **Image format** — Camera analyzer sets `OUTPUT_IMAGE_FORMAT_RGBA_8888` and uses CameraX's built-in `ImageProxy.toBitmap()`. The old manual YUV_420_888 → NV21 → JPEG conversion path was removed (it caused green-screen corruption).
 6. **Release APK** — Requires signing via env vars (`STORE_FILE`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`). CI decodes keystore from `KEYSTORE_BASE64` secret.
 7. **AGP 9.0.1 SDK bug** — On Windows, AGP 9.0.1 has SDK target discovery issues. Use GitHub Actions (Ubuntu) for reliable builds.
 8. **detekt + roborazzi** — Plugins declared in root `build.gradle.kts` with `apply false`, applied in `app/build.gradle.kts`.

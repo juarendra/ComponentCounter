@@ -131,9 +131,8 @@ class ObjectDetectorHelper(
             val cy = rawOutput[1][idx]
             val w = rawOutput[2][idx]
             val h = rawOutput[3][idx]
-            val (sx1, sy1) = lb.toSource(cx - w / 2, cy - h / 2)
-            val (sx2, sy2) = lb.toSource(cx + w / 2, cy + h / 2)
-            val x1 = sx1; val y1 = sy1; val x2 = sx2; val y2 = sy2
+            val (x1, y1) = lb.toSource(cx - w / 2, cy - h / 2)
+            val (x2, y2) = lb.toSource(cx + w / 2, cy + h / 2)
 
             if (x2 > x1 && y2 > y1) {
                 candidates.add(BBox(

@@ -3,10 +3,6 @@ package com.example.componentcounter.ui.camera
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,7 +38,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.componentcounter.ml.ObjectDetectorHelper
 import com.example.componentcounter.viewmodel.CounterViewModel
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 @Composable
@@ -167,8 +162,14 @@ fun CameraPreviewWithDetection(context: Context, lifecycleOwner: androidx.lifecy
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
             val imageAnalyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
-                .also { it.setAnalyzer(cameraExecutor) { proxy -> proxy.use { val bmp = proxy.toBitmap() ?: return@use; detector.detect(rotateBitmap(bmp, proxy.imageInfo.rotationDegrees)) } } }
+                .also { it.setAnalyzer(cameraExecutor) { proxy ->
+                    proxy.use {
+                        val bmp = proxy.toBitmap()
+                        detector.detect(rotateBitmap(bmp, proxy.imageInfo.rotationDegrees))
+                    }
+                } }
 
             val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             try { cameraProvider.unbindAll(); cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalyzer) }
@@ -185,24 +186,4 @@ private fun rotateBitmap(bitmap: android.graphics.Bitmap, degrees: Int): android
     if (degrees == 0) return bitmap
     val matrix = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
     return android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-}
-
-private fun androidx.camera.core.ImageProxy.toBitmap(): android.graphics.Bitmap? {
-    return when (format) {
-        ImageFormat.YUV_420_888 -> {
-            val nv21 = ByteArray(planes[0].buffer.remaining() + planes[1].buffer.remaining() + planes[2].buffer.remaining())
-            planes[0].buffer.get(nv21, 0, planes[0].buffer.remaining())
-            if (planes[2].pixelStride == 2) {
-                var i = planes[0].buffer.remaining(); var vi = 0
-                while (vi < planes[2].buffer.remaining()) { nv21[i++] = planes[2].buffer.get(vi); vi += 2 }
-                i = planes[0].buffer.remaining() + planes[2].buffer.remaining() / 2; var ui = 0
-                while (ui < planes[1].buffer.remaining()) { nv21[i++] = planes[1].buffer.get(ui); ui += 2 }
-            } else { planes[2].buffer.get(nv21, planes[0].buffer.remaining(), planes[2].buffer.remaining()); planes[1].buffer.get(nv21, planes[0].buffer.remaining() + planes[2].buffer.remaining(), planes[1].buffer.remaining()) }
-            val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-            val out = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(0, 0, width, height), 95, out)
-            BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
-        }
-        else -> android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888).also { planes[0].buffer.rewind(); it.copyPixelsFromBuffer(planes[0].buffer) }
-    }
 }

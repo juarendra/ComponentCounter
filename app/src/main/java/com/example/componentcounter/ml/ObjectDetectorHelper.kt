@@ -41,8 +41,10 @@ class ObjectDetectorHelper(
 ) {
     private var interpreter: org.tensorflow.lite.Interpreter? = null
     private val inputSize = 416
-    private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
-    private val threshold = 0.15f
+    // Class order MUST match the trained model's data.yaml (smdComponents):
+    // 0 Condensator, 1 Diode, 2 Resistor, 3 Transistor. See ml-training/MODEL_IO.md.
+    private val labels = listOf("Condensator", "Diode", "Resistor", "Transistor")
+    private val threshold = 0.25f
 
     // Anchor-free YOLO (v5u/v8) output: [1, 4+numClasses, numBoxes]
     // numBoxes = 52*52 + 26*26 + 13*13 = 3549 for 416 input
@@ -54,7 +56,7 @@ class ObjectDetectorHelper(
 
     companion object {
         val LABEL_MAP = mapOf(
-            0 to "Resistor", 1 to "Diode", 2 to "Transistor", 3 to "Condensator"
+            0 to "Condensator", 1 to "Diode", 2 to "Resistor", 3 to "Transistor"
         )
     }
 

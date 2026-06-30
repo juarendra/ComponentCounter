@@ -25,18 +25,22 @@ jobs:
       - name: Determine version bump
         id: version
         run: |
-          COMMIT_MSG=$(git log -1 --pretty=%B)
-
-          if [ -f version.txt ]; then
+          # Source of truth = latest semver tag, so versions are always monotonic
+          # even if version.txt drifts. version.txt is informational only.
+          LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -n "$LATEST_TAG" ]; then
+            CURRENT="${LATEST_TAG#v}"
+          elif [ -f version.txt ]; then
             CURRENT=$(cat version.txt)
           else
             CURRENT="1.0.0"
           fi
 
-          MAJOR=$(echo $CURRENT | cut -d. -f1)
-          MINOR=$(echo $CURRENT | cut -d. -f2)
-          PATCH=$(echo $CURRENT | cut -d. -f3)
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
 
+          COMMIT_MSG=$(git log -1 --pretty=%B)
           if echo "$COMMIT_MSG" | grep -qiE '^BREAKING CHANGE|^feat!:|^fix!:|^refactor!:'; then
             MAJOR=$((MAJOR + 1))
             MINOR=0
@@ -50,12 +54,15 @@ jobs:
 
           NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "Version determined: $NEW_VERSION"
+          echo "Version: ${CURRENT} -> ${NEW_VERSION} (latest tag: ${LATEST_TAG:-none})"
 
   build:
     name: Build & Sign APK
     needs: version
     runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ${{ needs.version.outputs.version }}
+      APP_VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
         with:

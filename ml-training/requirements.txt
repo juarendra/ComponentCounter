@@ -1,4 +1,4 @@
-tensorflow==2.16.0
-tflite-model-maker>=0.4.0
-roboflow>=1.0.0
-pycocotools>=2.0.0
+ultralytics>=8.3.0
+roboflow>=1.1.0
+onnx>=1.16.0
+tensorflow>=2.16.0

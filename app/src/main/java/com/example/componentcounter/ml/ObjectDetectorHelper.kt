@@ -114,10 +114,24 @@ class ObjectDetectorHelper(
         }
 
         val rawOutput = output[0]
-        val candidates = mutableListOf<BBox>()
+        val results = decodeOutput(rawOutput, lb, bitmap.width, bitmap.height)
+        val inferenceMs = SystemClock.uptimeMillis() - startTime
+        listener?.onResults(results, inferenceMs, bitmap.height, bitmap.width)
+    }
 
+    /**
+     * Pure decode path: builds candidate boxes from a raw channel-first model output,
+     * un-maps them from the 416 letterboxed space to source pixels, thresholds, and runs NMS.
+     * Independent of the interpreter so it can be unit-tested with a synthetic [rawOutput].
+     */
+    internal fun decodeOutput(
+        rawOutput: Array<FloatArray>,
+        lb: Letterbox,
+        bmpWidth: Int,
+        bmpHeight: Int
+    ): List<BBox> {
+        val candidates = mutableListOf<BBox>()
         for (idx in 0 until numBoxes) {
-            // Best class (scores already passed through sigmoid in the exported graph)
             var maxScore = 0f
             var maxClsIdx = -1
             for (c in 0 until numClasses) {
@@ -125,28 +139,21 @@ class ObjectDetectorHelper(
                 if (s > maxScore) { maxScore = s; maxClsIdx = c }
             }
             if (maxScore < threshold || maxClsIdx < 0) continue
-
-            // Box channels are normalized 0..1 in the 416 letterboxed space.
             val cx = rawOutput[0][idx]
             val cy = rawOutput[1][idx]
             val w = rawOutput[2][idx]
             val h = rawOutput[3][idx]
             val (x1, y1) = lb.toSource(cx - w / 2, cy - h / 2)
             val (x2, y2) = lb.toSource(cx + w / 2, cy + h / 2)
-
             if (x2 > x1 && y2 > y1) {
                 candidates.add(BBox(
                     max(0f, x1), max(0f, y1),
-                    min(bitmap.width.toFloat(), x2), min(bitmap.height.toFloat(), y2),
+                    min(bmpWidth.toFloat(), x2), min(bmpHeight.toFloat(), y2),
                     labels[maxClsIdx], maxScore
                 ))
             }
         }
-
-        // NMS
-        val results = nms(candidates)
-        val inferenceMs = SystemClock.uptimeMillis() - startTime
-        listener?.onResults(results, inferenceMs, bitmap.height, bitmap.width)
+        return nms(candidates)
     }
 
     private fun nms(boxes: List<BBox>): List<BBox> {

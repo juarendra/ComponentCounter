@@ -22,7 +22,7 @@ class DecodeOutputTest {
 
     @Test fun no_candidates_below_threshold_returns_empty() {
         val helper = newHelper()
-        val raw = emptyRaw() // all class scores 0 -> below 0.15 threshold
+        val raw = emptyRaw() // all class scores 0 -> below 0.25 threshold
         val lb = Letterbox.compute(640, 480, 416)
         val out = helper.decodeOutput(raw, lb, 640, 480)
         assertTrue(out.isEmpty())
@@ -32,9 +32,10 @@ class DecodeOutputTest {
         val helper = newHelper()
         val raw = emptyRaw()
         val i = 100
-        // centered box, 20% size, class 0 (Resistor) high confidence
+        // centered box, 20% size. Class index 2 = Resistor (data.yaml order:
+        // 0 Condensator, 1 Diode, 2 Resistor, 3 Transistor) -> channel 4+2.
         raw[0][i] = 0.5f; raw[1][i] = 0.5f; raw[2][i] = 0.2f; raw[3][i] = 0.2f
-        raw[4][i] = 0.9f
+        raw[6][i] = 0.9f
         val lb = Letterbox.compute(640, 480, 416) // letterbox geometry for a 640x480 source
         val out = helper.decodeOutput(raw, lb, 640, 480)
         assertEquals(1, out.size)

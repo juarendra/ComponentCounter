@@ -8,7 +8,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
-import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 
@@ -18,6 +17,24 @@ data class BBox(
     val label: String, val score: Float
 )
 
+/** Aspect-preserving resize geometry. `scale`/`padX`/`padY` map dst(416)<->src pixels. */
+data class Letterbox(val scale: Float, val padX: Float, val padY: Float, val dst: Int) {
+    /** Map a normalized (0..1) coord in the letterboxed dst image to source pixels. */
+    fun toSource(nx: Float, ny: Float): Pair<Float, Float> {
+        val px = nx * dst - padX
+        val py = ny * dst - padY
+        return Pair(px / scale, py / scale)
+    }
+    companion object {
+        fun compute(srcW: Int, srcH: Int, dst: Int): Letterbox {
+            val scale = minOf(dst.toFloat() / srcW, dst.toFloat() / srcH)
+            val padX = (dst - srcW * scale) / 2f
+            val padY = (dst - srcH * scale) / 2f
+            return Letterbox(scale, padX, padY, dst)
+        }
+    }
+}
+
 class ObjectDetectorHelper(
     val context: Context,
     val listener: DetectorListener?
@@ -25,17 +42,15 @@ class ObjectDetectorHelper(
     private var interpreter: org.tensorflow.lite.Interpreter? = null
     private val inputSize = 416
     private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
-    private val threshold = 0.5f
+    private val threshold = 0.15f
 
-    // YOLOv5 anchor configuration for 416x416
-    private val strides = intArrayOf(8, 16, 32)
-    private val anchors = arrayOf(
-        arrayOf(intArrayOf(10, 13), intArrayOf(16, 30), intArrayOf(33, 23)),
-        arrayOf(intArrayOf(30, 61), intArrayOf(62, 45), intArrayOf(59, 119)),
-        arrayOf(intArrayOf(116, 90), intArrayOf(156, 198), intArrayOf(373, 326))
-    )
+    // Anchor-free YOLO (v5u/v8) output: [1, 4+numClasses, numBoxes]
+    // numBoxes = 52*52 + 26*26 + 13*13 = 3549 for 416 input
     private val numClasses = labels.size
     private val numOutputs = 4 + numClasses
+    private val numBoxes = (inputSize / 8) * (inputSize / 8) +
+        (inputSize / 16) * (inputSize / 16) +
+        (inputSize / 32) * (inputSize / 32)
 
     companion object {
         val LABEL_MAP = mapOf(
@@ -67,11 +82,19 @@ class ObjectDetectorHelper(
 
         val startTime = SystemClock.uptimeMillis()
 
-        val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        val lb = Letterbox.compute(bitmap.width, bitmap.height, inputSize)
+        val canvas = Bitmap.createBitmap(inputSize, inputSize, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(canvas).apply {
+            drawColor(android.graphics.Color.rgb(114, 114, 114))
+            val nw = bitmap.width * lb.scale
+            val nh = bitmap.height * lb.scale
+            val dstRect = android.graphics.RectF(lb.padX, lb.padY, lb.padX + nw, lb.padY + nh)
+            drawBitmap(bitmap, null, dstRect, null)
+        }
         val inputBuffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * 4)
         inputBuffer.order(ByteOrder.nativeOrder())
         val pixels = IntArray(inputSize * inputSize)
-        resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
+        canvas.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
         for (p in pixels) {
             inputBuffer.putFloat(((p shr 16) and 0xFF) / 255.0f)
             inputBuffer.putFloat(((p shr 8) and 0xFF) / 255.0f)
@@ -79,80 +102,58 @@ class ObjectDetectorHelper(
         }
         inputBuffer.rewind()
 
-        // Output: [1, 8, 3549] — 3549 = (13*13 + 26*26 + 52*52) * 3 anchors
-        val totalDetections = (13*13 + 26*26 + 52*52) * 3
-        val output = Array(1) { Array(numOutputs) { FloatArray(totalDetections) } }
-        interpreter.run(inputBuffer, output)
-
-        val rawOutput = output[0]
-        val candidates = mutableListOf<BBox>()
-
-        // Iterate over 3 detection scales
-        var offset = 0
-        for (scaleIdx in strides.indices) {
-            val stride = strides[scaleIdx]
-            val gridSize = inputSize / stride
-            val numAnchors = anchors[scaleIdx].size
-            val numCells = gridSize * gridSize * numAnchors
-
-            for (i in 0 until numCells) {
-                val idx = offset + i
-                if (idx >= totalDetections) break
-
-                // Raw outputs
-                val rawCx = rawOutput[0][idx]
-                val rawCy = rawOutput[1][idx]
-                val rawW  = rawOutput[2][idx]
-                val rawH  = rawOutput[3][idx]
-
-                // Find best class
-                var maxScore = 0f
-                var maxClsIdx = -1
-                for (c in 0 until numClasses) {
-                    val s = sigmoid(rawOutput[4 + c][idx])
-                    if (s > maxScore) { maxScore = s; maxClsIdx = c }
-                }
-
-                if (maxScore < threshold) continue
-
-                // Decode box coordinates (YOLOv5 format)
-                val gridY = (i / numAnchors) / gridSize
-                val gridX = (i / numAnchors) % gridSize
-                val anchorIdx = i % numAnchors
-                val anchorW = anchors[scaleIdx][anchorIdx][0].toFloat()
-                val anchorH = anchors[scaleIdx][anchorIdx][1].toFloat()
-
-                val cx = (sigmoid(rawCx) * 2 - 0.5f + gridX) * stride
-                val cy = (sigmoid(rawCy) * 2 - 0.5f + gridY) * stride
-                val w  = ((sigmoid(rawW) * 2).pow(2) * anchorW)
-                val h  = ((sigmoid(rawH) * 2).pow(2) * anchorH)
-
-                val x1 = (cx - w / 2) / inputSize * bitmap.width
-                val y1 = (cy - h / 2) / inputSize * bitmap.height
-                val x2 = (cx + w / 2) / inputSize * bitmap.width
-                val y2 = (cy + h / 2) / inputSize * bitmap.height
-
-                if (x2 > x1 && y2 > y1) {
-                    candidates.add(BBox(
-                        max(0f, x1), max(0f, y1),
-                        min(bitmap.width.toFloat(), x2), min(bitmap.height.toFloat(), y2),
-                        labels[maxClsIdx], maxScore
-                    ))
-                }
-            }
-            offset += numCells
+        // Output: [1, numOutputs, numBoxes] — anchor-free, channel-first.
+        // Channels 0..3 = cx,cy,w,h ; channels 4.. = per-class confidence (already 0..1).
+        val output = Array(1) { Array(numOutputs) { FloatArray(numBoxes) } }
+        try {
+            interpreter.run(inputBuffer, output)
+        } catch (e: Exception) {
+            listener?.onError("Inference failed: ${e.message}")
+            listener?.onResults(emptyList(), 0, bitmap.height, bitmap.width)
+            return
         }
 
-        // NMS
-        val results = nms(candidates)
+        val rawOutput = output[0]
+        val results = decodeOutput(rawOutput, lb, bitmap.width, bitmap.height)
         val inferenceMs = SystemClock.uptimeMillis() - startTime
         listener?.onResults(results, inferenceMs, bitmap.height, bitmap.width)
     }
 
-    private fun sigmoid(x: Float): Float = 1f / (1f + exp(-x))
-
-    private fun Float.pow(n: Int): Float {
-        var r = 1f; repeat(n) { r *= this }; return r
+    /**
+     * Pure decode path: builds candidate boxes from a raw channel-first model output,
+     * un-maps them from the 416 letterboxed space to source pixels, thresholds, and runs NMS.
+     * Independent of the interpreter so it can be unit-tested with a synthetic [rawOutput].
+     */
+    internal fun decodeOutput(
+        rawOutput: Array<FloatArray>,
+        lb: Letterbox,
+        bmpWidth: Int,
+        bmpHeight: Int
+    ): List<BBox> {
+        val candidates = mutableListOf<BBox>()
+        for (idx in 0 until numBoxes) {
+            var maxScore = 0f
+            var maxClsIdx = -1
+            for (c in 0 until numClasses) {
+                val s = rawOutput[4 + c][idx]
+                if (s > maxScore) { maxScore = s; maxClsIdx = c }
+            }
+            if (maxScore < threshold || maxClsIdx < 0) continue
+            val cx = rawOutput[0][idx]
+            val cy = rawOutput[1][idx]
+            val w = rawOutput[2][idx]
+            val h = rawOutput[3][idx]
+            val (x1, y1) = lb.toSource(cx - w / 2, cy - h / 2)
+            val (x2, y2) = lb.toSource(cx + w / 2, cy + h / 2)
+            if (x2 > x1 && y2 > y1) {
+                candidates.add(BBox(
+                    max(0f, x1), max(0f, y1),
+                    min(bmpWidth.toFloat(), x2), min(bmpHeight.toFloat(), y2),
+                    labels[maxClsIdx], maxScore
+                ))
+            }
+        }
+        return nms(candidates)
     }
 
     private fun nms(boxes: List<BBox>): List<BBox> {

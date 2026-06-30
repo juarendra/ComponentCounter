@@ -17,6 +17,24 @@ data class BBox(
     val label: String, val score: Float
 )
 
+/** Aspect-preserving resize geometry. `scale`/`padX`/`padY` map dst(416)<->src pixels. */
+data class Letterbox(val scale: Float, val padX: Float, val padY: Float, val dst: Int) {
+    /** Map a normalized (0..1) coord in the letterboxed dst image to source pixels. */
+    fun toSource(nx: Float, ny: Float): Pair<Float, Float> {
+        val px = nx * dst - padX
+        val py = ny * dst - padY
+        return Pair(px / scale, py / scale)
+    }
+    companion object {
+        fun compute(srcW: Int, srcH: Int, dst: Int): Letterbox {
+            val scale = minOf(dst.toFloat() / srcW, dst.toFloat() / srcH)
+            val padX = (dst - srcW * scale) / 2f
+            val padY = (dst - srcH * scale) / 2f
+            return Letterbox(scale, padX, padY, dst)
+        }
+    }
+}
+
 class ObjectDetectorHelper(
     val context: Context,
     val listener: DetectorListener?
@@ -24,7 +42,7 @@ class ObjectDetectorHelper(
     private var interpreter: org.tensorflow.lite.Interpreter? = null
     private val inputSize = 416
     private val labels = listOf("Resistor", "Diode", "Transistor", "Condensator")
-    private val threshold = 0.25f
+    private val threshold = 0.15f
 
     // Anchor-free YOLO (v5u/v8) output: [1, 4+numClasses, numBoxes]
     // numBoxes = 52*52 + 26*26 + 13*13 = 3549 for 416 input
@@ -64,11 +82,19 @@ class ObjectDetectorHelper(
 
         val startTime = SystemClock.uptimeMillis()
 
-        val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        val lb = Letterbox.compute(bitmap.width, bitmap.height, inputSize)
+        val canvas = Bitmap.createBitmap(inputSize, inputSize, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(canvas).apply {
+            drawColor(android.graphics.Color.rgb(114, 114, 114))
+            val nw = bitmap.width * lb.scale
+            val nh = bitmap.height * lb.scale
+            val dstRect = android.graphics.RectF(lb.padX, lb.padY, lb.padX + nw, lb.padY + nh)
+            drawBitmap(bitmap, null, dstRect, null)
+        }
         val inputBuffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * 4)
         inputBuffer.order(ByteOrder.nativeOrder())
         val pixels = IntArray(inputSize * inputSize)
-        resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
+        canvas.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
         for (p in pixels) {
             inputBuffer.putFloat(((p shr 16) and 0xFF) / 255.0f)
             inputBuffer.putFloat(((p shr 8) and 0xFF) / 255.0f)
@@ -100,20 +126,14 @@ class ObjectDetectorHelper(
             }
             if (maxScore < threshold || maxClsIdx < 0) continue
 
-            // Box channels. Ultralytics TFLite export emits normalized 0..1 xywh;
-            // guard in case a build emits pixel (0..inputSize) coords instead.
-            var cx = rawOutput[0][idx]
-            var cy = rawOutput[1][idx]
-            var w = rawOutput[2][idx]
-            var h = rawOutput[3][idx]
-            if (cx > 1.5f || cy > 1.5f || w > 1.5f || h > 1.5f) {
-                cx /= inputSize; cy /= inputSize; w /= inputSize; h /= inputSize
-            }
-
-            val x1 = (cx - w / 2) * bitmap.width
-            val y1 = (cy - h / 2) * bitmap.height
-            val x2 = (cx + w / 2) * bitmap.width
-            val y2 = (cy + h / 2) * bitmap.height
+            // Box channels are normalized 0..1 in the 416 letterboxed space.
+            val cx = rawOutput[0][idx]
+            val cy = rawOutput[1][idx]
+            val w = rawOutput[2][idx]
+            val h = rawOutput[3][idx]
+            val (sx1, sy1) = lb.toSource(cx - w / 2, cy - h / 2)
+            val (sx2, sy2) = lb.toSource(cx + w / 2, cy + h / 2)
+            val x1 = sx1; val y1 = sy1; val x2 = sx2; val y2 = sy2
 
             if (x2 > x1 && y2 > y1) {
                 candidates.add(BBox(

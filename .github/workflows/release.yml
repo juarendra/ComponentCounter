@@ -27,6 +27,7 @@ jobs:
         run: |
           # Source of truth = latest semver tag, so versions are always monotonic
           # even if version.txt drifts. version.txt is informational only.
+          git fetch --tags --force  # robust even if fetch-depth changes later
           LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -1)
           if [ -n "$LATEST_TAG" ]; then
             CURRENT="${LATEST_TAG#v}"

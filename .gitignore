@@ -35,3 +35,9 @@ cmdline-tools.zip
 *.zip
 golden/ 
 source/  
+
+# ML training artifacts (kept out of repo)
+*.pt
+*.onnx
+runs/
+tfl_out/
